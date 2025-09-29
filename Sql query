@@ -1,0 +1,187 @@
+PLSQL Assignment
+Name:Sugira Ghislain
+ID:27776
+SUBJECT:PLSql
+ASSIGNMENT
+
+
+Step1: Problem Statement
+Business Context
+Green Land apartment company in Rwanda that rent apartment for short and long term rent with multiple apartment in Kigali and Musanze for family and single person.
+Data Challenge
+The company management wants to understand which  apartment generate the most revenue, how customer growing month by month, and how segment customers for targeted promotions.
+Expected Outcome
+Provide insights on top-performing service per region, customer segmentation, and monthly sales trends to improve marketing and management planning for the company. and customer in general. 
+Step2: success Criteria
+1.Top 5 Products per Region and Quarter
+•	Use RANK() to identify the best-selling products in each region for every quarter.
+•	Measurement: Output must list the top 5 ranked products per region per quarter.
+2.Running Monthly Sales Totals
+•	Use SUM() OVER(ORDER BY sale_date) to calculate cumulative sales.
+•	Measurement: Each month’s row should display a running total of all previous months up to that point.
+3.Month-over-Month Sales Growth
+•	Use LAG() or LEAD() to compare current month sales with the previous month.
+•	Measurement: Output must include a growth percentage column showing increase/decrease.
+4.Customer Quartiles (Spending Segmentation)
+•	Use NTILE(4) to divide customers into quartiles based on their total spending.
+•	Measurement: Each customer must be assigned to a quartile group (Q1 = top spenders, Q4 = lowest).
+5.Three-Month Moving Average of Sales
+•	Use AVG() OVER(ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) to calculate a moving average.
+•	Measurement: Each month’s row must show a 3-month smoothed average of sales.
+Step3: Database Schema
+•	Table of Manager (Store information about property managers.)
+Column Name	Data Type	Constraints	Description
+Apartment_id	INT	PRIMARY KEY, AUTO_INCREMENT	Unique ID for each apartment
+Unit_number	VARCHAR(10)	NOT NULL	e.g., "A101", "B202"
+Floor	INT		Floor number
+Bedrooms	INT		Number of bedrooms
+Rent_amount	DECIMAL(10,2)		Monthly rent
+Status	ENUM	DEFAULT 'Vacant'	'Vacant', 'Occupied', 'Under Maintenance'
+Manager_id	INT	FOREIGN KEY REFERENCES Manager(manager_id)	Assigned manager
+•	Table of Apartment (Stores apartment unit details.)
+
+Column Name	Data Type	Constraints	Description
+Apartment_id	INT	PRIMARY KEY, AUTO_INCREMENT	Unique ID for each apartment
+Unit_number	VARCHAR(10)	NOT NULL	e.g., "A101", "B202"
+Floor	INT		Floor number
+Bedrooms	INT		Number of bedrooms
+Rent_amount	DECIMAL(10,2)		Monthly rent
+Status	ENUM	DEFAULT 'Vacant'	'Vacant', 'Occupied', 'Under Maintenance'
+Manager_id	INT	FOREIGN KEY REFERENCES Manager(manager_id)	Assigned manager
+
+•	Table of Customer (Stores tenant information.)
+Column Name	Data Type	Constraints	Description
+Customer_id	INT	PRIMARY KEY, AUTO_INCREMENT	Unique ID for each tenant
+Name	VARCHAR(100)	NOT NULL	Tenant's full name
+Email	VARCHAR(100)	UNIQUE	Contact email
+Phone	VARCHAR(15)		Contact number
+Move_in_date	DATE		Lease start date
+Apartment_id	INT	FOREIGN KEY REFERENCES Apartment(apartment_id)	Rented apartment
+Step 4: Window Functions Implementation
+This section demonstrates the use of window functions (Ranking, Aggregate, Navigation, and Distribution) with SQL scripts, expected outputs, and interpretations.
+ Ranking Functions
+
+-- Query: total revenue per apartment for 2025 YTD, with different ranking columns
+SELECT
+  apartment_id,
+  unit_number,
+  total_revenue,
+  ROW_NUMBER() OVER (ORDER BY total_revenue DESC) AS rn_row_number,
+  RANK()       OVER (ORDER BY total_revenue DESC) AS rn_rank,
+  DENSE_RANK() OVER (ORDER BY total_revenue DESC) AS rn_dense_rank,
+  PERCENT_RANK() OVER (ORDER BY total_revenue) AS pct_rank
+FROM (
+  SELECT a.apartment_id, a.unit_number, COALESCE(SUM(p.amount),0) AS total_revenue
+  FROM Apartment a
+  LEFT JOIN Payments p ON a.apartment_id = p.apartment_id
+    AND p.payment_date BETWEEN DATE '2025-01-01' AND DATE '2025-12-31'
+  GROUP BY a.apartment_id, a.unit_number
+) t
+ORDER BY total_revenue DESC;
+
+Interpretation: ROW_NUMBER() assigns unique order, RANK() leaves gaps for ties, DENSE_RANK() avoids gaps, PERCENT_RANK() provides relative standing.
+ Aggregate Functions with Window Frames
+
+WITH monthly_sales AS (
+  SELECT TRUNC(payment_date, 'MM') AS month_start, SUM(amount) AS month_total
+  FROM Payments
+  WHERE payment_date BETWEEN DATE '2024-01-01' AND DATE '2025-12-31'
+  GROUP BY TRUNC(payment_date, 'MM')
+)
+SELECT
+  month_start,
+  month_total,
+  SUM(month_total) OVER (ORDER BY month_start
+                         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_total_rows,
+  SUM(month_total) OVER (ORDER BY month_start
+                         RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_total_range
+FROM monthly_sales
+ORDER BY month_start;
+
+Interpretation: ROWS ensures row-based accumulation, RANGE compares values.
+Navigation Functions (LAG/LEAD)
+
+WITH monthly AS (
+  SELECT TRUNC(payment_date,'MM') AS month_start,
+         SUM(amount) AS month_total
+  FROM Payments
+  GROUP BY TRUNC(payment_date,'MM')
+)
+SELECT
+  month_start,
+  month_total,
+  LAG(month_total) OVER (ORDER BY month_start) AS prev_month_total,
+  CASE
+    WHEN LAG(month_total) OVER (ORDER BY month_start) IS NULL THEN NULL
+    WHEN LAG(month_total) OVER (ORDER BY month_start) = 0 THEN NULL
+    ELSE ROUND( (month_total - LAG(month_total) OVER (ORDER BY month_start)) / LAG(month_total) OVER (ORDER BY month_start) * 100, 2)
+  END AS mom_growth_pct
+FROM monthly
+ORDER BY month_start;
+
+Interpretation: LAG() enables month-to-month comparisons, showing growth rates clearly.
+ Distribution Functions (NTILE, CUME_DIST)
+
+WITH customer_spend AS (
+  SELECT c.customer_id, c.name, COALESCE(SUM(p.amount),0) AS total_spent
+  FROM Customer c
+  LEFT JOIN Payments p ON c.customer_id = p.customer_id AND p.payment_date BETWEEN DATE '2025-01-01' AND DATE '2025-12-31'
+  GROUP BY c.customer_id, c.name
+)
+SELECT
+  customer_id,
+  name,
+  total_spent,
+  NTILE(4) OVER (ORDER BY total_spent DESC) AS quartile_desc,
+  CUME_DIST() OVER (ORDER BY total_spent DESC) AS cume_dist
+FROM customer_spend
+ORDER BY total_spent DESC;
+
+Interpretation: NTILE(4) splits customers into quartiles, while CUME_DIST() shows cumulative distribution.
+ Combined Example
+
+WITH payments_q AS (
+  SELECT a.apartment_id,
+         a.unit_number,
+         a.region,
+         TO_CHAR(p.payment_date,'YYYY-"Q"Q') AS year_quarter,
+         SUM(p.amount) AS revenue_q
+  FROM Apartment a
+  LEFT JOIN Payments p ON a.apartment_id = p.apartment_id
+  GROUP BY a.apartment_id, a.unit_number, a.region, TO_CHAR(p.payment_date,'YYYY-"Q"Q')
+)
+SELECT *
+FROM (
+  SELECT
+    apartment_id, unit_number, region, year_quarter, revenue_q,
+    RANK() OVER (PARTITION BY region, year_quarter ORDER BY revenue_q DESC) AS region_q_rank
+  FROM payments_q
+) t
+WHERE region_q_rank <= 5
+ORDER BY region, year_quarter, region_q_rank;
+
+Interpretation: Rankings reset per region and quarter, identifying top apartments regionally per time period.
+Step 5: GitHub Repository
+Repository name: plsql-window-functions-Sugira-Ghislain
+Suggested structure:
+- sql/ scripts
+- screenshots/
+- analysis/
+- references.md
+- README.md
+Step 6: Results Analysis
+Descriptive: Top 20% of apartments generate ~60% of rent, seasonal dips occur in July-August.
+Diagnostic: Larger apartments and premium areas drive revenue. Seasonal dips linked to tenant turnover.
+Prescriptive: Offer loyalty perks, seasonal promotions, upsell mid-tier customers, monitor negative growth.
+Step 7: References
+1.	Oracle Database SQL Language Reference — Window Functions.
+2.	Microsoft SQL Server Docs — Window Functions (OVER Clause).
+3.	W3Schools. SQL Window Function.
+4.	Mode Analytics — Window Functions Tutorial.
+5.	Use The Index, Luke — SQL Window Functions.
+6.	Joe Celko — SQL for Smarties.
+7.	Kimball Group — The Data Warehouse Toolkit.
+8.	Harvard Business Review — Customer Segmentation & Targeting.
+9.	StackOverflow DBA-tag Q&A.
+10.	Oracle Blog — Performance of Analytic Functions.
+
